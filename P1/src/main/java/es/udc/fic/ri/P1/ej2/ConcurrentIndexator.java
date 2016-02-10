@@ -15,18 +15,15 @@ import org.apache.lucene.store.Directory;
 import org.apache.lucene.store.FSDirectory;
 import org.apache.lucene.util.Version;
 
-import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.IOException;
-import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.Date;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -210,10 +207,13 @@ public class ConcurrentIndexator {
 
 	/** Index all text files under a directory. */
 	public static void main(String[] args) {
-		String usage = "java org.apache.lucene.demo.IndexFiles"
-				+ " [-index INDEX_PATH] [-docs DOCS_PATH] [-update]\n\n"
-				+ "This indexes the documents in DOCS_PATH, creating a Lucene index"
-				+ "in INDEX_PATH that can be searched with SearchFiles";
+		String usage = "es.udc.fic.ri.P1.ej2.ConcurrentIndexator\n"
+				+ "[-openmode OPENMODE] [-parser PARSER] "
+				+ "[-index INDEX_PATH] [-coll PATHNAME] "
+				+ "[-onlydocs INT] [-addroute FIELD] "
+				+ "[-indexes PATHNAME(1..n)] "
+				+ "[-colls PATHNAME(1..n)] [-removedups] \n\n";
+
 		Path indexPath = null;
 		DirectoryStream<Path> docsPath = null;
 		OpenMode mode = OpenMode.CREATE_OR_APPEND;
