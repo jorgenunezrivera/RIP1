@@ -145,9 +145,13 @@ public class ConcurrentIndexator {
 					// If that's not the case searching for special
 					// characters
 					// will fail.
-					doc.add(new TextField("contents", new BufferedReader(
+					
+					doc.add(new TextField("topics", new BufferedReader(
 							new InputStreamReader(fis, StandardCharsets.UTF_8))));
-
+					
+					doc.add(new TextField("body", new BufferedReader(
+							new InputStreamReader(fis, StandardCharsets.UTF_8))));
+					
 					if (writer.getConfig().getOpenMode() == OpenMode.CREATE) {
 						// New index, so we just add the document (no old
 						// document can be there):
