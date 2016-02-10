@@ -142,45 +142,44 @@ public class ConcurrentIndexator {
 					buffer.append(content);
 					List<List<String>> dataList = Reuters21578Parser
 							.parseString(buffer);
-					
+
 					StringBuffer topics = new StringBuffer();
 					for (List<String> list : dataList) {
-						topics.append(list.get(2)+" ");
+						topics.append(list.get(2) + " ");
 					}
-					
+
 					StringBuffer body = new StringBuffer();
 					for (List<String> list : dataList) {
-						body.append(list.get(1)+" ");
+						body.append(list.get(1) + " ");
 					}
-					
+
 					StringBuffer title = new StringBuffer();
 					for (List<String> list : dataList) {
-						title.append(list.get(0)+" ");
+						title.append(list.get(0) + " ");
 					}
-					
+
 					StringBuffer dateline = new StringBuffer();
 					for (List<String> list : dataList) {
-						dateline.append(list.get(3)+" ");
+						dateline.append(list.get(3) + " ");
 					}
-					
+
 					StringBuffer date = new StringBuffer();
 					for (List<String> list : dataList) {
-						date.append(list.get(4)+" ");
+						date.append(list.get(4) + " ");
 					}
-					
+
 					doc.add(new TextField("topics", topics.toString(),
 							Field.Store.NO));
-					
+
 					doc.add(new TextField("body", body.toString(),
 							Field.Store.NO));
 
-					
 					doc.add(new TextField("title", title.toString(),
 							Field.Store.YES));
-					
+
 					doc.add(new TextField("dateline", dateline.toString(),
 							Field.Store.NO));
-					
+
 					doc.add(new TextField("date", date.toString(),
 							Field.Store.YES));
 
@@ -217,12 +216,12 @@ public class ConcurrentIndexator {
 				+ "in INDEX_PATH that can be searched with SearchFiles";
 		Path indexPath = null;
 		DirectoryStream<Path> docsPath = null;
-		boolean create = true;
+		OpenMode mode = OpenMode.CREATE_OR_APPEND;
 		for (int i = 0; i < args.length; i++) {
 			if ("-index".equals(args[i])) {
 				indexPath = Paths.get(args[i + 1]);
 				i++;
-			} else if ("-docs".equals(args[i])) {
+			} else if ("-coll".equals(args[i])) {
 				try {
 					docsPath = Files.newDirectoryStream(Paths.get(args[i + 1]));
 				} catch (IOException e) {
@@ -230,8 +229,16 @@ public class ConcurrentIndexator {
 					System.exit(-1);
 				}
 				i++;
-			} else if ("-update".equals(args[i])) {
-				create = false;
+			} else if ("-openmode".equals(args[i])) {
+				if (args[i + 1].equals("append")) {
+					mode = OpenMode.APPEND;
+				} else if (args[i + 1].equals("create")) {
+					mode = OpenMode.CREATE;
+				} else if (args[i + 1].equals("create_or_append")) {
+				} else {
+					System.err.println("Usage: " + usage);
+					System.exit(1);
+				}
 			}
 		}
 
@@ -250,14 +257,7 @@ public class ConcurrentIndexator {
 			IndexWriterConfig iwc = new IndexWriterConfig(
 					Version.LUCENE_4_10_0, analyzer);
 
-			if (create) {
-				// Create a new index in the directory, removing any
-				// previously indexed documents:
-				iwc.setOpenMode(OpenMode.CREATE);
-			} else {
-				// Add new documents to an existing index:
-				iwc.setOpenMode(OpenMode.CREATE_OR_APPEND);
-			}
+			iwc.setOpenMode(mode);
 
 			writer = new IndexWriter(dir, iwc);
 
