@@ -135,18 +135,6 @@ public class ConcurrentIndexator {
 					doc.add(new LongField("modified", file.lastModified(),
 							Field.Store.NO));
 
-					// Add the contents of the file to a field named
-					// "contents".
-					// Specify a Reader,
-					// so that the text of the file is tokenized and
-					// indexed,
-					// but not stored.
-					// Note that FileReader expects the file to be in UTF-8
-					// encoding.
-					// If that's not the case searching for special
-					// characters
-					// will fail.
-
 					byte[] encoded = Files.readAllBytes(file.toPath());
 					String text = new String(encoded, StandardCharsets.UTF_8);
 					char[] content = text.toCharArray();
@@ -157,35 +145,44 @@ public class ConcurrentIndexator {
 					
 					StringBuffer topics = new StringBuffer();
 					for (List<String> list : dataList) {
-						topics.append(list.get(2));
+						topics.append(list.get(2)+" ");
 					}
 					
 					StringBuffer body = new StringBuffer();
 					for (List<String> list : dataList) {
-						body.append(list.get(1));
+						body.append(list.get(1)+" ");
 					}
 					
 					StringBuffer title = new StringBuffer();
 					for (List<String> list : dataList) {
-						title.append(list.get(0));
+						title.append(list.get(0)+" ");
 					}
 					
 					StringBuffer dateline = new StringBuffer();
 					for (List<String> list : dataList) {
-						dateline.append(list.get(3));
+						dateline.append(list.get(3)+" ");
 					}
-
+					
+					StringBuffer date = new StringBuffer();
+					for (List<String> list : dataList) {
+						date.append(list.get(4)+" ");
+					}
+					
 					doc.add(new TextField("topics", topics.toString(),
 							Field.Store.NO));
 					
 					doc.add(new TextField("body", body.toString(),
 							Field.Store.NO));
+
 					
 					doc.add(new TextField("title", title.toString(),
 							Field.Store.YES));
 					
 					doc.add(new TextField("dateline", dateline.toString(),
 							Field.Store.NO));
+					
+					doc.add(new TextField("date", date.toString(),
+							Field.Store.YES));
 
 					if (writer.getConfig().getOpenMode() == OpenMode.CREATE) {
 						// New index, so we just add the document (no old

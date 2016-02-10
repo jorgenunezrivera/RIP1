@@ -1,7 +1,12 @@
 package es.udc.fic.ri.P1.ej2;
 
+import java.text.ParseException;
+import java.text.SimpleDateFormat;
+import java.util.Date;
 import java.util.LinkedList;
 import java.util.List;
+
+import org.apache.lucene.document.DateTools;
 
 public class Reuters21578Parser {
 
@@ -90,6 +95,17 @@ public class Reuters21578Parser {
 		String title = extract("TITLE", text, true);
 		String dateline = extract("DATELINE", text, true);
 		String body = extract("BODY", text, true);
+		
+		String rawDate = extract("DATE",text,true);
+		SimpleDateFormat dt = new SimpleDateFormat("d-MMM-yyyy hh:mm:ss"); 
+		Date date =null;
+		try {
+			date = dt.parse(rawDate.trim());
+		} catch (ParseException e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+		} 
+		
 		if (body.endsWith(END_BOILERPLATE_1)
 				|| body.endsWith(END_BOILERPLATE_2))
 			body = body
@@ -100,6 +116,7 @@ public class Reuters21578Parser {
 		document.add(topics.replaceAll("\\<D\\>", " ").replaceAll("\\<\\/D\\>",
 				""));
 		document.add(dateline);
+		document.add(DateTools.dateToString(date, DateTools.Resolution.SECOND));
 		return document;
 	}
 
