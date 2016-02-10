@@ -24,6 +24,7 @@ import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -35,10 +36,15 @@ public class ConcurrentIndexator {
 
 		private final Path folder;
 		private final IndexWriter writer;
+		private final boolean route;
+		private final int sgm;
 
-		public WorkerThread(final Path folder, IndexWriter writer) {
+		public WorkerThread(final Path folder, IndexWriter writer,
+				boolean route, int sgm) {
 			this.folder = folder;
 			this.writer = writer;
+			this.route = route;
+			this.sgm = sgm;
 		}
 
 		/**
@@ -59,7 +65,7 @@ public class ConcurrentIndexator {
 				System.out.println(String.format("Thread '%s' Indexing '%s'",
 						Thread.currentThread().getName(), folder));
 
-				indexDocs(writer, docDir);
+				indexDocs(writer, docDir, route, sgm);
 
 				// NOTE: if you want to maximize search performance,
 				// you can optionally call forceMerge here. This can be
@@ -77,7 +83,8 @@ public class ConcurrentIndexator {
 		}
 	}
 
-	static void indexDocs(IndexWriter writer, File file) throws IOException {
+	static void indexDocs(IndexWriter writer, File file, boolean route, int sgm)
+			throws IOException {
 		// do not try to index files that cannot be read
 		if (file.canRead()) {
 			if (file.isDirectory()) {
@@ -85,10 +92,11 @@ public class ConcurrentIndexator {
 				// an IO error could occur
 				if (files != null) {
 					for (int i = 0; i < files.length; i++) {
-						indexDocs(writer, new File(file, files[i]));
+						indexDocs(writer, new File(file, files[i]), route, sgm);
 					}
 				}
-			} else {
+			} else if (checkFile(file.getName())
+					&& (sgm == -1 || checkFile(file.getName(), sgm))) {
 
 				FileInputStream fis;
 				try {
@@ -112,10 +120,6 @@ public class ConcurrentIndexator {
 					// the field into separate words and don't index term
 					// frequency
 					// or positional information:
-					Field pathField = new StringField("file", file.getName(),
-							Field.Store.YES);
-					doc.add(pathField);
-
 					// Add the last modified date of the file a field named
 					// "modified".
 					// Use a LongField that is indexed (i.e. efficiently
@@ -129,8 +133,11 @@ public class ConcurrentIndexator {
 					// you require.
 					// For example the long value 2011021714 would mean
 					// February 17, 2011, 2-3 PM.
-					doc.add(new LongField("modified", file.lastModified(),
-							Field.Store.NO));
+					if (route) {
+						Field pathField = new StringField("path",
+								file.getPath(), Field.Store.YES);
+						doc.add(pathField);
+					}
 
 					byte[] encoded = Files.readAllBytes(file.toPath());
 					String text = new String(encoded, StandardCharsets.UTF_8);
@@ -210,16 +217,18 @@ public class ConcurrentIndexator {
 		String usage = "es.udc.fic.ri.P1.ej2.ConcurrentIndexator\n"
 				+ "[-openmode OPENMODE] [-parser PARSER] "
 				+ "[-index INDEX_PATH] [-coll PATHNAME] "
-				+ "[-onlydocs INT] [-addroute FIELD] "
-				+ "[-indexes PATHNAME(1..n)] "
+				+ "[-onlydocs INT] [-addroute] " + "[-indexes PATHNAME(1..n)] "
 				+ "[-colls PATHNAME(1..n)] [-removedups] \n\n";
 
-		Path indexPath = null;
+		List<Path> indexPath = new ArrayList<Path>();
 		DirectoryStream<Path> docsPath = null;
 		OpenMode mode = OpenMode.CREATE_OR_APPEND;
+		boolean route = false;
+		int sgm = -1;
+
 		for (int i = 0; i < args.length; i++) {
 			if ("-index".equals(args[i])) {
-				indexPath = Paths.get(args[i + 1]);
+				indexPath.add(Paths.get(args[i + 1]));
 				i++;
 			} else if ("-coll".equals(args[i])) {
 				try {
@@ -239,6 +248,16 @@ public class ConcurrentIndexator {
 					System.err.println("Usage: " + usage);
 					System.exit(1);
 				}
+			} else if ("-indexes".equals(args[i])) {
+				while (Files.isDirectory(Paths.get(args[i + 1]))) {
+					indexPath.add(Paths.get(args[i + 1]));
+					i = i + 1;
+					;
+				}
+			} else if ("-addroute".equals(args[i])) {
+				route = true;
+			} else if ("-onlydocs".equals(args[i])) {
+				sgm = Integer.parseInt(args[i + 1]);
 			}
 		}
 
@@ -250,20 +269,27 @@ public class ConcurrentIndexator {
 		final int numCores = Runtime.getRuntime().availableProcessors();
 		final ExecutorService executor = Executors.newFixedThreadPool(numCores);
 		IndexWriter writer = null;
-
 		try {
-			Directory dir = FSDirectory.open(new File(indexPath.toString()));
+			Directory dir = FSDirectory.open(new File(indexPath.get(0)
+					.toString()));
+
 			Analyzer analyzer = new StandardAnalyzer(Version.LUCENE_4_10_0);
 			IndexWriterConfig iwc = new IndexWriterConfig(
 					Version.LUCENE_4_10_0, analyzer);
 
 			iwc.setOpenMode(mode);
-
 			writer = new IndexWriter(dir, iwc);
+			indexPath.remove(0);
+
+			for (final Path path : indexPath) {
+
+				writer.addIndexes(FSDirectory.open(new File(path.toString())));
+			}
 
 			for (final Path path : docsPath) {
 				if (Files.isDirectory(path)) {
-					final Runnable worker = new WorkerThread(path, writer);
+					final Runnable worker = new WorkerThread(path, writer,
+							route, sgm);
 					/*
 					 * Send the thread to the ThreadPool. It will be processed
 					 * eventually.
@@ -271,7 +297,7 @@ public class ConcurrentIndexator {
 					executor.execute(worker);
 				} else if (Files.isRegularFile(path)) {
 					/* Files not contained in subfolders */
-					indexDocs(writer, path.toFile());
+					indexDocs(writer, path.toFile(), route, sgm);
 				}
 			}
 		} catch (IOException e1) {
@@ -304,4 +330,17 @@ public class ConcurrentIndexator {
 		System.out.println("Finished all threads");
 
 	}
+
+	static boolean checkFile(String fnam) {
+		return fnam.matches("reut2-\\d\\d\\d.sgm");
+	}
+
+	static boolean checkFile(String fnam, int m) {
+		if (checkFile(fnam)) {
+			int n = Integer.parseInt(fnam.substring(6, 9));
+			return (n == m);
+		} else
+			return false;
+	}
+
 }
