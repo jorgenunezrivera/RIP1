@@ -115,7 +115,7 @@ public class ConcurrentIndexator {
 					// the field into separate words and don't index term
 					// frequency
 					// or positional information:
-					Field pathField = new StringField("path", file.getPath(),
+					Field pathField = new StringField("file", file.getName(),
 							Field.Store.YES);
 					doc.add(pathField);
 
@@ -146,22 +146,47 @@ public class ConcurrentIndexator {
 					// If that's not the case searching for special
 					// characters
 					// will fail.
-					
-					  byte[] encoded = Files.readAllBytes(file.toPath());
-					  String text = new String(encoded, StandardCharsets.UTF_8);
-					  char[] content = text.toCharArray();
-					  StringBuffer buffer = new StringBuffer();
-					  buffer.append(content);
-					  List<List<String>> dataList = Reuters21578Parser.parseString(buffer);
-					  
-					  
-					  
-					  
-					/*doc.add(new TextField("topics", new BufferedReader(
-							Reuters21578Parser.parseString(encoded));*/
-					
 
+					byte[] encoded = Files.readAllBytes(file.toPath());
+					String text = new String(encoded, StandardCharsets.UTF_8);
+					char[] content = text.toCharArray();
+					StringBuffer buffer = new StringBuffer();
+					buffer.append(content);
+					List<List<String>> dataList = Reuters21578Parser
+							.parseString(buffer);
 					
+					StringBuffer topics = new StringBuffer();
+					for (List<String> list : dataList) {
+						topics.append(list.get(2));
+					}
+					
+					StringBuffer body = new StringBuffer();
+					for (List<String> list : dataList) {
+						body.append(list.get(1));
+					}
+					
+					StringBuffer title = new StringBuffer();
+					for (List<String> list : dataList) {
+						title.append(list.get(0));
+					}
+					
+					StringBuffer dateline = new StringBuffer();
+					for (List<String> list : dataList) {
+						dateline.append(list.get(3));
+					}
+
+					doc.add(new TextField("topics", topics.toString(),
+							Field.Store.NO));
+					
+					doc.add(new TextField("body", body.toString(),
+							Field.Store.NO));
+					
+					doc.add(new TextField("title", title.toString(),
+							Field.Store.YES));
+					
+					doc.add(new TextField("dateline", dateline.toString(),
+							Field.Store.NO));
+
 					if (writer.getConfig().getOpenMode() == OpenMode.CREATE) {
 						// New index, so we just add the document (no old
 						// document can be there):
@@ -248,7 +273,7 @@ public class ConcurrentIndexator {
 					 */
 					executor.execute(worker);
 				} else if (Files.isRegularFile(path)) {
-					/*Files not contained in subfolders*/
+					/* Files not contained in subfolders */
 					indexDocs(writer, path.toFile());
 				}
 			}
