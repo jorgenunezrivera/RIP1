@@ -27,6 +27,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.Date;
+import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -146,11 +147,20 @@ public class ConcurrentIndexator {
 					// characters
 					// will fail.
 					
-					doc.add(new TextField("topics", new BufferedReader(
-							new InputStreamReader(fis, StandardCharsets.UTF_8))));
+					  byte[] encoded = Files.readAllBytes(file.toPath());
+					  String text = new String(encoded, StandardCharsets.UTF_8);
+					  char[] content = text.toCharArray();
+					  StringBuffer buffer = new StringBuffer();
+					  buffer.append(content);
+					  List<List<String>> dataList = Reuters21578Parser.parseString(buffer);
+					  
+					  
+					  
+					  
+					/*doc.add(new TextField("topics", new BufferedReader(
+							Reuters21578Parser.parseString(encoded));*/
 					
-					doc.add(new TextField("body", new BufferedReader(
-							new InputStreamReader(fis, StandardCharsets.UTF_8))));
+
 					
 					if (writer.getConfig().getOpenMode() == OpenMode.CREATE) {
 						// New index, so we just add the document (no old
