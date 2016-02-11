@@ -83,6 +83,18 @@ public class ConcurrentIndexator {
 		}
 	}
 
+	static boolean checkFile(String fnam) {
+		return fnam.matches("reut2-\\d\\d\\d.sgm");
+	}
+
+	static boolean checkFile(String fnam, int m) {
+		if (checkFile(fnam)) {
+			int n = Integer.parseInt(fnam.substring(6, 9));
+			return (n == m);
+		} else
+			return false;
+	}
+
 	static void indexDocs(IndexWriter writer, File file, boolean route, int sgm)
 			throws IOException {
 		// do not try to index files that cannot be read
@@ -221,26 +233,23 @@ public class ConcurrentIndexator {
 				+ "[-colls PATHNAME(1..n)] [-removedups] \n\n";
 
 		List<Path> indexPath = new ArrayList<Path>();
-		DirectoryStream<Path> docsPath = null;
+		List<Path> docsPath = new ArrayList<Path>();
 		OpenMode mode = OpenMode.CREATE_OR_APPEND;
 		boolean route = false;
 		int sgm = -1;
+		int nDirs = 0;
 
 		for (int i = 0; i < args.length; i++) {
 			if ("-index".equals(args[i])) {
 				indexPath.add(Paths.get(args[i + 1]));
 				i++;
 			} else if ("-coll".equals(args[i])) {
-				try {
-					docsPath = Files.newDirectoryStream(Paths.get(args[i + 1]));
-				} catch (IOException e) {
-					e.printStackTrace();
-					System.exit(-1);
-				}
+				docsPath.add(Paths.get(args[i + 1]));
 				i++;
 			} else if ("-openmode".equals(args[i])) {
 				if (args[i + 1].equals("append")) {
 					mode = OpenMode.APPEND;
+
 				} else if (args[i + 1].equals("create")) {
 					mode = OpenMode.CREATE;
 				} else if (args[i + 1].equals("create_or_append")) {
@@ -248,11 +257,18 @@ public class ConcurrentIndexator {
 					System.err.println("Usage: " + usage);
 					System.exit(1);
 				}
+				i++;
 			} else if ("-indexes".equals(args[i])) {
-				while (Files.isDirectory(Paths.get(args[i + 1]))) {
+				while ((i + 1) < args.length
+						&& Files.isDirectory(Paths.get(args[i + 1]))) {
 					indexPath.add(Paths.get(args[i + 1]));
-					i = i + 1;
-					;
+					i++;
+				}
+			} else if ("-colls".equals(args[i])) {
+				while ((i + 1) < args.length
+						&& Files.isDirectory(Paths.get(args[i + 1]))) {
+					docsPath.add(Paths.get(args[i + 1]));
+					i++;
 				}
 			} else if ("-addroute".equals(args[i])) {
 				route = true;
@@ -261,67 +277,56 @@ public class ConcurrentIndexator {
 			}
 		}
 
-		if (docsPath == null) {
+		if (docsPath.isEmpty() || docsPath.size() != indexPath.size()) {
 			System.err.println("Usage: " + usage);
 			System.exit(1);
 		}
 
+		nDirs = indexPath.size();
+
 		final int numCores = Runtime.getRuntime().availableProcessors();
 		final ExecutorService executor = Executors.newFixedThreadPool(numCores);
-		IndexWriter writer = null;
+		List<IndexWriter> writer = new ArrayList<IndexWriter>();
+		Analyzer analyzer = new StandardAnalyzer(Version.LUCENE_4_10_0);
+		List<IndexWriterConfig> iwc = new ArrayList<IndexWriterConfig>();
+
 		try {
-			Directory dir = FSDirectory.open(new File(indexPath.get(0)
-					.toString()));
+			for (int i = 0; i < nDirs; i++) {
+				iwc.add(new IndexWriterConfig(Version.LUCENE_4_10_0, analyzer));
+				iwc.get(i).setOpenMode(mode);
+				Directory dir = FSDirectory.open(new File(indexPath.get(i)
+						.toString()));
+				writer.add(new IndexWriter(dir, iwc.get(i)));
 
-			Analyzer analyzer = new StandardAnalyzer(Version.LUCENE_4_10_0);
-			IndexWriterConfig iwc = new IndexWriterConfig(
-					Version.LUCENE_4_10_0, analyzer);
-
-			iwc.setOpenMode(mode);
-			writer = new IndexWriter(dir, iwc);
-			indexPath.remove(0);
-
-			for (final Path path : indexPath) {
-
-				writer.addIndexes(FSDirectory.open(new File(path.toString())));
-			}
-
-			for (final Path path : docsPath) {
-				if (Files.isDirectory(path)) {
-					final Runnable worker = new WorkerThread(path, writer,
-							route, sgm);
-					/*
-					 * Send the thread to the ThreadPool. It will be processed
-					 * eventually.
-					 */
+				if (Files.isDirectory(docsPath.get(i))) {
+					Path path = docsPath.get(i);
+					final Runnable worker = new WorkerThread(path,
+							writer.get(i), route, sgm);
 					executor.execute(worker);
-				} else if (Files.isRegularFile(path)) {
-					/* Files not contained in subfolders */
-					indexDocs(writer, path.toFile(), route, sgm);
 				}
 			}
-		} catch (IOException e1) {
-			e1.printStackTrace();
-		}
+			/*
+			 * Close the ThreadPool; no more jobs will be accepted, but all the
+			 * previously submitted jobs will be processed.
+			 */
+			executor.shutdown();
 
-		/*
-		 * Close the ThreadPool; no more jobs will be accepted, but all the
-		 * previously submitted jobs will be processed.
-		 */
-		executor.shutdown();
+			/*
+			 * Wait up to 1 hour to finish all the previously submitted jobs and
+			 * close IndexWriter
+			 */
 
-		/*
-		 * Wait up to 1 hour to finish all the previously submitted jobs and
-		 * close IndexWriter
-		 */
-		try {
 			executor.awaitTermination(1, TimeUnit.HOURS);
 		} catch (final InterruptedException e) {
 			e.printStackTrace();
 			System.exit(-2);
+		} catch (final IOException e) {
+			e.printStackTrace();
+			System.exit(-2);
 		} finally {
 			try {
-				writer.close();
+				for (int i = 0; i < nDirs; i++)
+					writer.get(i).close();
 			} catch (IOException e) {
 				e.printStackTrace();
 			}
@@ -330,17 +335,4 @@ public class ConcurrentIndexator {
 		System.out.println("Finished all threads");
 
 	}
-
-	static boolean checkFile(String fnam) {
-		return fnam.matches("reut2-\\d\\d\\d.sgm");
-	}
-
-	static boolean checkFile(String fnam, int m) {
-		if (checkFile(fnam)) {
-			int n = Integer.parseInt(fnam.substring(6, 9));
-			return (n == m);
-		} else
-			return false;
-	}
-
 }
