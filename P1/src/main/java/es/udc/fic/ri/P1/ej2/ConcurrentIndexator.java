@@ -1,10 +1,14 @@
 package es.udc.fic.ri.P1.ej2;
 
+import java.text.ParseException;
+import java.text.SimpleDateFormat;
+import java.util.LinkedList;
+
 import org.apache.lucene.analysis.Analyzer;
 import org.apache.lucene.analysis.standard.StandardAnalyzer;
+import org.apache.lucene.document.DateTools;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.document.Field;
-import org.apache.lucene.document.LongField;
 import org.apache.lucene.document.StringField;
 import org.apache.lucene.document.TextField;
 import org.apache.lucene.index.IndexWriter;
@@ -20,17 +24,151 @@ import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 public class ConcurrentIndexator {
+
+	public static class Reuters21578Parser {
+
+		/*
+		 * Project testlucene 3.6.0, the Reuters21578Parser class parses the
+		 * collection.
+		 */
+
+		private static final String END_BOILERPLATE_1 = "Reuter\n&#3;";
+		private static final String END_BOILERPLATE_2 = "REUTER\n&#3;";
+
+		// private static final String[] TOPICS = { "acq", "alum", "austdlr",
+		// "barley", "bean", "belly", "bfr", "bop", "cake", "can", "carcass",
+		// "castor", "castorseed", "cattle", "chem", "citruspulp", "cocoa",
+		// "coconut", "coffee", "copper", "copra", "corn", "cornglutenfeed",
+		// "cotton", "cottonseed", "cpi", "cpu", "crude", "cruzado", "debt",
+		// "dfl", "dkr", "dlr", "dmk", "earn", "f", "feed", "fishmeal",
+		// "fuel", "fx", "gas", "gnp", "gold", "grain", "groundnut", "heat",
+		// "hk", "hog", "housing", "income", "instal", "interest",
+		// "inventories", "ipi", "iron", "jet", "jobs", "l", "lead", "lei",
+		// "lin", "linseed", "lit", "livestock", "lumber", "meal", "metal",
+		// "money", "naphtha", "nat", "nickel", "nkr", "nzdlr", "oat", "oil",
+		// "oilseed", "orange", "palladium", "palm", "palmkernel", "peseta",
+		// "pet", "platinum", "plywood", "pork", "potato", "propane", "rand",
+		// "rape", "rapeseed", "red", "reserves", "retail", "rice", "ringgit",
+		// "rubber", "rupiah", "rye", "saudriyal", "sfr", "ship", "silver",
+		// "skr", "sorghum", "soy", "soybean", "steel", "stg", "strategic",
+		// "sugar", "sun", "sunseed", "supply", "tapioca", "tea", "tin",
+		// "trade", "veg", "wheat", "wool", "wpi", "yen", "zinc" };
+
+		public static List<List<String>> parseString(StringBuffer fileContent) {
+			/* First the contents are converted to a string */
+			String text = fileContent.toString();
+
+			/*
+			 * The method split of the String class splits the strings using the
+			 * delimiter which was passed as argument Therefor lines is an array
+			 * of strings, one string for each line
+			 */
+			String[] lines = text.split("\n");
+
+			/*
+			 * For each Reuters article the parser returns a list of strings
+			 * where each element of the list is a field (TITLE, BODY, TOPICS,
+			 * DATELINE). Each *.sgm file that is passed in fileContent can
+			 * contain many Reuters articles, so finally the parser returns a
+			 * list of list of strings, i.e, a list of reuters articles, that is
+			 * what the object documents contains
+			 */
+
+			List<List<String>> documents = new LinkedList<List<String>>();
+
+			/* The tag REUTERS identifies the beginning and end of each article */
+
+			for (int i = 0; i < lines.length; ++i) {
+				if (!lines[i].startsWith("<REUTERS"))
+					continue;
+				StringBuilder sb = new StringBuilder();
+				while (!lines[i].startsWith("</REUTERS")) {
+					sb.append(lines[i++]);
+					sb.append("\n");
+				}
+				/*
+				 * Here the sb object of the StringBuilder class contains the
+				 * Reuters article which is converted to text and passed to the
+				 * handle document method that will return the document in the
+				 * form of a list of fields
+				 */
+				documents.add(handleDocument(sb.toString()));
+			}
+			return documents;
+		}
+
+		public static List<String> handleDocument(String text) {
+
+			/*
+			 * This method returns the Reuters article that is passed as text as
+			 * a list of fields
+			 */
+
+			/* The fields TOPICS, TITLE, DATELINE and BODY are extracted */
+			/* Each topic inside TOPICS is identified with a tag D */
+			/* If the BODY ends with boiler plate text, this text is removed */
+
+			String topics = extract("TOPICS", text, true);
+			String title = extract("TITLE", text, true);
+			String dateline = extract("DATELINE", text, true);
+			String body = extract("BODY", text, true);
+			String date = extract("DATE", text, true);
+
+			if (body.endsWith(END_BOILERPLATE_1)
+					|| body.endsWith(END_BOILERPLATE_2))
+				body = body.substring(0,
+						body.length() - END_BOILERPLATE_1.length());
+			List<String> document = new LinkedList<String>();
+			document.add(title);
+			document.add(body);
+			document.add(topics.replaceAll("\\<D\\>", " ").replaceAll(
+					"\\<\\/D\\>", ""));
+			document.add(dateline);
+			document.add(date);
+			return document;
+		}
+
+		private static String extract(String elt, String text,
+				boolean allowEmpty) {
+
+			/*
+			 * This method find the tags for the field elt in the String text
+			 * and extracts and returns the content
+			 */
+			/*
+			 * If the tag does not exists and the allowEmpty argument is true,
+			 * the method returns the null string, if allowEmpty is false it
+			 * returns a IllegalArgumentException
+			 */
+
+			String startElt = "<" + elt + ">";
+			String endElt = "</" + elt + ">";
+			int startEltIndex = text.indexOf(startElt);
+			if (startEltIndex < 0) {
+				if (allowEmpty)
+					return "";
+				throw new IllegalArgumentException("no start, elt=" + elt
+						+ " text=" + text);
+			}
+			int start = startEltIndex + startElt.length();
+			int end = text.indexOf(endElt, start);
+			if (end < 0)
+				throw new IllegalArgumentException("no end, elt=" + elt
+						+ " text=" + text);
+			return text.substring(start, end);
+		}
+	}
 
 	static class WorkerThread implements Runnable {
 
@@ -95,6 +233,57 @@ public class ConcurrentIndexator {
 			return false;
 	}
 
+	static String getField(File file, String fieldName) {
+		StringBuffer fieldValue = new StringBuffer();
+		int fieldIndex = -1;
+		fieldName = fieldName.toLowerCase();
+
+		try {
+			byte[] encoded = Files.readAllBytes(file.toPath());
+			String text = new String(encoded, StandardCharsets.UTF_8);
+			char[] content = text.toCharArray();
+			StringBuffer buffer = new StringBuffer();
+			buffer.append(content);
+			List<List<String>> dataList = Reuters21578Parser
+					.parseString(buffer);
+
+			if (fieldName.equals("title"))
+				fieldIndex = 0;
+			if (fieldName.equalsIgnoreCase("body"))
+				fieldIndex = 1;
+			if (fieldName.equals("topics"))
+				fieldIndex = 2;
+			if (fieldName.equals("dateline"))
+				fieldIndex = 3;
+			if (fieldName.equals("date"))
+				fieldIndex = 4;
+
+			if (fieldIndex == -1)
+				return null;
+
+			for (List<String> list : dataList) {
+				fieldValue.append(list.get(fieldIndex) + " ");
+			}
+
+			if (fieldIndex == 4)
+				return dateConversion(fieldValue.toString());
+
+		} catch (IOException e) {
+			e.printStackTrace();
+		} catch (ParseException e) {
+			e.printStackTrace();
+		}
+
+		return fieldValue.toString();
+	}
+
+	static String dateConversion(String rawDate) throws ParseException {
+		SimpleDateFormat dt = new SimpleDateFormat("d-MMM-yyyy hh:mm:ss");
+		Date date = null;
+		date = dt.parse(rawDate.trim());
+		return DateTools.dateToString(date, DateTools.Resolution.SECOND);
+	}
+
 	static void indexDocs(IndexWriter writer, File file, boolean route, int sgm)
 			throws IOException {
 		// do not try to index files that cannot be read
@@ -151,52 +340,19 @@ public class ConcurrentIndexator {
 						doc.add(pathField);
 					}
 
-					byte[] encoded = Files.readAllBytes(file.toPath());
-					String text = new String(encoded, StandardCharsets.UTF_8);
-					char[] content = text.toCharArray();
-					StringBuffer buffer = new StringBuffer();
-					buffer.append(content);
-					List<List<String>> dataList = Reuters21578Parser
-							.parseString(buffer);
-
-					StringBuffer topics = new StringBuffer();
-					for (List<String> list : dataList) {
-						topics.append(list.get(2) + " ");
-					}
-
-					StringBuffer body = new StringBuffer();
-					for (List<String> list : dataList) {
-						body.append(list.get(1) + " ");
-					}
-
-					StringBuffer title = new StringBuffer();
-					for (List<String> list : dataList) {
-						title.append(list.get(0) + " ");
-					}
-
-					StringBuffer dateline = new StringBuffer();
-					for (List<String> list : dataList) {
-						dateline.append(list.get(3) + " ");
-					}
-
-					StringBuffer date = new StringBuffer();
-					for (List<String> list : dataList) {
-						date.append(list.get(4) + " ");
-					}
-
-					doc.add(new TextField("topics", topics.toString(),
+					doc.add(new TextField("topics", getField(file, "topics"),
 							Field.Store.NO));
 
-					doc.add(new TextField("body", body.toString(),
+					doc.add(new TextField("body", getField(file, "body"),
 							Field.Store.NO));
 
-					doc.add(new TextField("title", title.toString(),
+					doc.add(new TextField("title", getField(file, "title"),
 							Field.Store.YES));
 
-					doc.add(new TextField("dateline", dateline.toString(),
-							Field.Store.NO));
+					doc.add(new TextField("dateline",
+							getField(file, "dateline"), Field.Store.NO));
 
-					doc.add(new TextField("date", date.toString(),
+					doc.add(new TextField("date", getField(file, "date"),
 							Field.Store.YES));
 
 					if (writer.getConfig().getOpenMode() == OpenMode.CREATE) {
