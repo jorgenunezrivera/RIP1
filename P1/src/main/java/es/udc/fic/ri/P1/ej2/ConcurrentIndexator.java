@@ -13,16 +13,30 @@ import org.apache.lucene.document.StringField;
 import org.apache.lucene.document.TextField;
 import org.apache.lucene.index.IndexWriter;
 import org.apache.lucene.index.IndexWriterConfig.OpenMode;
+import org.apache.lucene.index.DirectoryReader;
+import org.apache.lucene.index.IndexReader;
 import org.apache.lucene.index.IndexWriterConfig;
 import org.apache.lucene.index.Term;
+import org.apache.lucene.queryparser.classic.QueryParser;
+import org.apache.lucene.search.BooleanClause;
+import org.apache.lucene.search.BooleanQuery;
+import org.apache.lucene.search.IndexSearcher;
+import org.apache.lucene.search.MatchAllDocsQuery;
+import org.apache.lucene.search.PhraseQuery;
+import org.apache.lucene.search.Query;
+import org.apache.lucene.search.ScoreDoc;
+import org.apache.lucene.search.TermQuery;
+import org.apache.lucene.search.TopDocs;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.store.FSDirectory;
 import org.apache.lucene.util.Version;
 
+import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -176,13 +190,17 @@ public class ConcurrentIndexator {
 		private final IndexWriter writer;
 		private final boolean route;
 		private final int sgm;
+		private final boolean removedups;
+		private final String index;
 
 		public WorkerThread(final Path folder, IndexWriter writer,
-				boolean route, int sgm) {
+				boolean route, int sgm, boolean removedups, String index) {
 			this.folder = folder;
 			this.writer = writer;
 			this.route = route;
 			this.sgm = sgm;
+			this.removedups = removedups;
+			this.index = index;
 		}
 
 		/**
@@ -202,16 +220,12 @@ public class ConcurrentIndexator {
 			try {
 				System.out.println(String.format("Thread '%s' Indexing '%s'",
 						Thread.currentThread().getName(), folder));
-
 				indexDocs(writer, docDir, route, sgm);
-
-				// NOTE: if you want to maximize search performance,
-				// you can optionally call forceMerge here. This can be
-				// a terribly costly operation, so generally it's only
-				// worth it when your index is relatively static (ie
-				// you're done adding documents to it):
-				//
-				// writer.forceMerge(1);
+				if (removedups) {
+					writer.commit();
+					File[] files = docDir.listFiles();
+					removeDups(writer, files, index);
+				}
 
 			} catch (IOException e) {
 				System.out.println(" caught a " + e.getClass()
@@ -233,49 +247,6 @@ public class ConcurrentIndexator {
 			return false;
 	}
 
-	static String getField(File file, String fieldName) {
-		StringBuffer fieldValue = new StringBuffer();
-		int fieldIndex = -1;
-		fieldName = fieldName.toLowerCase();
-
-		try {
-			byte[] encoded = Files.readAllBytes(file.toPath());
-			String text = new String(encoded, StandardCharsets.UTF_8);
-			char[] content = text.toCharArray();
-			StringBuffer buffer = new StringBuffer();
-			buffer.append(content);
-			List<List<String>> dataList = Reuters21578Parser
-					.parseString(buffer);
-
-			if (fieldName.equals("title"))
-				fieldIndex = 0;
-			if (fieldName.equalsIgnoreCase("body"))
-				fieldIndex = 1;
-			if (fieldName.equals("topics"))
-				fieldIndex = 2;
-			if (fieldName.equals("dateline"))
-				fieldIndex = 3;
-			if (fieldName.equals("date"))
-				fieldIndex = 4;
-
-			if (fieldIndex == -1)
-				return null;
-
-			for (List<String> list : dataList) {
-				fieldValue.append(list.get(fieldIndex) + " ");
-			}
-
-			if (fieldIndex == 4)
-				return dateConversion(fieldValue.toString());
-
-		} catch (IOException e) {
-			e.printStackTrace();
-		} catch (ParseException e) {
-			e.printStackTrace();
-		}
-
-		return fieldValue.toString();
-	}
 
 	static String dateConversion(String rawDate) throws ParseException {
 		SimpleDateFormat dt = new SimpleDateFormat("d-MMM-yyyy hh:mm:ss");
@@ -311,55 +282,52 @@ public class ConcurrentIndexator {
 
 				try {
 
-					// make a new, empty document
-					Document doc = new Document();
+					List<Document> docs = new ArrayList<Document>();
 
-					// Add the path of the file as a field named "path". Use
-					// a
-					// field that is indexed (i.e. searchable), but don't
-					// tokenize
-					// the field into separate words and don't index term
-					// frequency
-					// or positional information:
-					// Add the last modified date of the file a field named
-					// "modified".
-					// Use a LongField that is indexed (i.e. efficiently
-					// filterable with
-					// NumericRangeFilter). This indexes to milli-second
-					// resolution, which
-					// is often too fine. You could instead create a number
-					// based on
-					// year/month/day/hour/minutes/seconds, down the
-					// resolution
-					// you require.
-					// For example the long value 2011021714 would mean
-					// February 17, 2011, 2-3 PM.
+
+
+					byte[] encoded = Files.readAllBytes(file.toPath());
+					String text = new String(encoded, StandardCharsets.UTF_8);
+
+					char[] content = text.toCharArray();
+					StringBuffer buffer = new StringBuffer();
+					buffer.append(content);
+					List<List<String>> dataList = Reuters21578Parser
+							.parseString(buffer);
+					for (List<String> articulo : dataList) 
+					{
+						
+						Document doc = new Document();
+						doc.add(new TextField("title", articulo.get(0),
+								Field.Store.YES));
+						doc.add(new TextField("topics", articulo.get(2),
+								Field.Store.NO));
+						doc.add(new TextField("body", articulo.get(1),
+								Field.Store.NO));
+						doc.add(new TextField("dateline", articulo.get(3),
+								Field.Store.NO));
+						docs.add(doc);
+					}
 					if (route) {
 						Field pathField = new StringField("path",
 								file.getPath(), Field.Store.YES);
-						doc.add(pathField);
+						for (Document d : docs)
+							d.add(pathField);
 					}
 
-					doc.add(new TextField("topics", getField(file, "topics"),
-							Field.Store.NO));
-
-					doc.add(new TextField("body", getField(file, "body"),
-							Field.Store.NO));
-
-					doc.add(new TextField("title", getField(file, "title"),
-							Field.Store.YES));
-
-					doc.add(new TextField("dateline",
-							getField(file, "dateline"), Field.Store.NO));
-
-					doc.add(new TextField("date", getField(file, "date"),
-							Field.Store.YES));
+					/*
+					 * 
+					 * 
+					 * doc.add(new TextField("contents", new BufferedReader( new
+					 * InputStreamReader(fis, StandardCharsets.UTF_8))));
+					 */
 
 					if (writer.getConfig().getOpenMode() == OpenMode.CREATE) {
 						// New index, so we just add the document (no old
 						// document can be there):
-						System.out.println("adding " + file);
-						writer.addDocument(doc);
+						for (Document doc : docs){
+							writer.addDocument(doc);
+						}
 					} else {
 						// Existing index (an old copy of this document may
 						// have
@@ -369,13 +337,74 @@ public class ConcurrentIndexator {
 						// matching the exact
 						// path, if present:
 						System.out.println("updating " + file);
-						writer.updateDocument(new Term("path", file.getPath()),
-								doc);
+						for (Document doc : docs)
+							writer.updateDocument(
+									new Term("path", file.getPath()), doc);
 					}
 
 				} finally {
 					fis.close();
 				}
+			}
+		}
+	}
+
+	static void removeDups(IndexWriter writer, File[] files, String index)
+			throws IOException {
+
+		FileInputStream fis;
+
+		for (File f : files) {
+
+			try {
+
+				fis = new FileInputStream(f);
+				BufferedReader buffer = new BufferedReader(
+						new InputStreamReader(fis, StandardCharsets.UTF_8));
+				StringBuilder text = new StringBuilder();
+				String aux = buffer.readLine();
+				while (aux != null) {
+					text.append(aux);
+					aux = buffer.readLine();
+					if (aux != null)
+						text.append("\n");
+				}
+
+				System.out.println(text);
+
+				Term content = new Term("contents", text.toString());
+
+				IndexReader reader = DirectoryReader.open(FSDirectory
+						.open(new File(index)));
+
+				IndexSearcher searcher = new IndexSearcher(reader);
+
+				BooleanQuery query = new BooleanQuery();
+				query.add(new BooleanClause(new MatchAllDocsQuery(),
+						BooleanClause.Occur.MUST));
+
+				query.add(new BooleanClause(new TermQuery(content),
+						BooleanClause.Occur.MUST));
+
+				TopDocs topDocs = searcher.search(query, 10);
+				int totalHits = topDocs.totalHits;
+
+				if (totalHits > 1) {
+					topDocs = searcher.search(query, 10);
+					totalHits = topDocs.totalHits;
+
+					if (totalHits > 0) {
+						System.out
+								.println("REMOVEDUPS ON: Deleting copies from file "
+										+ f.getPath() + "...");
+						writer.deleteDocuments(query);
+					}
+				}
+				writer.commit();
+				reader.close();
+				fis.close();
+			} catch (IOException e) {
+				e.printStackTrace();
 			}
 		}
 	}
@@ -392,6 +421,7 @@ public class ConcurrentIndexator {
 		List<Path> docsPath = new ArrayList<Path>();
 		OpenMode mode = OpenMode.CREATE_OR_APPEND;
 		boolean route = false;
+		boolean removedups = false;
 		int sgm = -1;
 		int nDirs = 0;
 
@@ -428,6 +458,10 @@ public class ConcurrentIndexator {
 				}
 			} else if ("-addroute".equals(args[i])) {
 				route = true;
+
+			} else if ("-removedups".equals(args[i])) {
+				removedups = true;
+
 			} else if ("-onlydocs".equals(args[i])) {
 				sgm = Integer.parseInt(args[i + 1]);
 			}
@@ -457,7 +491,8 @@ public class ConcurrentIndexator {
 				if (Files.isDirectory(docsPath.get(i))) {
 					Path path = docsPath.get(i);
 					final Runnable worker = new WorkerThread(path,
-							writer.get(i), route, sgm);
+							writer.get(i), route, sgm, removedups, indexPath
+									.get(i).toString());
 					executor.execute(worker);
 				}
 			}
@@ -481,8 +516,12 @@ public class ConcurrentIndexator {
 			System.exit(-2);
 		} finally {
 			try {
-				for (int i = 0; i < nDirs; i++)
+				for (int i = 1; i < nDirs; i++){
+					Directory dir = writer.get(i).getDirectory();
 					writer.get(i).close();
+					writer.get(0).addIndexes(dir);	
+				}
+				writer.get(0).close();
 			} catch (IOException e) {
 				e.printStackTrace();
 			}
