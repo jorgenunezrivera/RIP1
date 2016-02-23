@@ -49,6 +49,123 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 public class ConcurrentIndexator {
+	public static class CACMParser {
+
+		/*
+		 * CACM Parser by Jorge Nuñez
+		 * 
+		 */
+
+		
+		public static List<List<String>> parseString(StringBuffer fileContent) {
+			/* First the contents are converted to a string */
+			String text = fileContent.toString();
+
+			/*
+			 * The method split of the String class splits the strings using the
+			 * delimiter which was passed as argument Therefor lines is an array
+			 * of strings, one string for each line
+			 */
+			String[] lines = text.split("\n");
+
+			/*
+			 * For each CACM article the parser returns a list of strings
+			 * where each element of the list is a field ( docid (.I), title (.T),
+			 * abstract (.W), date (.B), authors (.A), keywords (.K), entrydate (.N)).
+			 * Each cacm-???.all file that is passed in fileContent can
+			 * contain many CACM articles, so finally the parser returns a
+			 * list of list of strings, i.e, a list of CACM articles, that is
+			 * what the object documents contains
+			 */
+
+			List<List<String>> documents = new LinkedList<List<String>>();
+
+			/* The tag .I identifies the beginning of each article */
+
+			for (int i = 0; i < lines.length; ++i) {
+				if (!lines[i].startsWith(".I"))
+					continue;
+				StringBuilder sb = new StringBuilder();
+				sb.append(lines[i++]);
+				sb.append("\n");
+				while(i<lines.length&&!lines[i].startsWith(".I"))
+				{
+					sb.append(lines[i++]);
+					sb.append("\n")	;
+				}
+				i--;
+				/*
+				 * Here the sb object of the StringBuilder class contains the
+				 * CACM article which is converted to text and passed to the
+				 * handle document method that will return the document in the
+				 * form of a list of fields
+				 */
+				documents.add(handleDocument(sb.toString()));
+			}
+			return documents;
+		}
+
+		public static List<String> handleDocument(String text) {
+
+			/*
+			 * This method returns the CACM article that is passed as text as
+			 * a list of fields
+			 */
+
+			/* The fields  docid (.I), title (.T), abstract (.W), date (.B), authors (.A), keywords */
+			/*	.K), entrydate (.N). are extracted */
+
+			String docid = extract("I", text, true);
+			String title = extract("T", text, true);
+			String sabstract = extract("W", text, true);
+			String date = extract("B", text, true);
+			String authors = extract("A", text, true);
+			String keywords = extract("K", text, true);
+			String entrydate = extract("N",text,true);
+			
+
+			List<String> document = new LinkedList<String>();
+			document.add(docid);
+			document.add(title);
+			document.add(sabstract);
+			document.add(date);
+			document.add(authors);
+			document.add(keywords);
+			document.add(entrydate);
+			return document;
+		}
+
+		private static String extract(String elt, String text,
+				boolean allowEmpty) {
+
+			/*
+			 * This method find the tags for the field elt in the String text
+			 * and extracts and returns the content
+			 */
+			/*
+			 * If the tag does not exists and the allowEmpty argument is true,
+			 * the method returns the null string, if allowEmpty is false it
+			 * returns a IllegalArgumentException
+			 */
+
+			String startElt = "." + elt;
+			int startEltIndex = text.indexOf(startElt);
+			if (startEltIndex < 0) {
+				if (allowEmpty)
+					return "";
+				throw new IllegalArgumentException("no start, elt=" + elt
+						+ " text=" + text);
+			}
+			int start = startEltIndex + startElt.length();
+			String endElt = "\n.";
+			int end = text.indexOf(endElt, start);
+			if (end < 0)
+				throw new IllegalArgumentException("no end, elt=" + elt
+						+ " text=" + text);
+			return text.substring(start, end);
+		}
+	}
+
 
 	public static class Reuters21578Parser {
 
@@ -192,15 +309,17 @@ public class ConcurrentIndexator {
 		private final int sgm;
 		private final boolean removedups;
 		private final String index;
+		private final String parsername;
 
 		public WorkerThread(final Path folder, IndexWriter writer,
-				boolean route, int sgm, boolean removedups, String index) {
+				boolean route, int sgm, boolean removedups, String index,String parsername) {
 			this.folder = folder;
 			this.writer = writer;
 			this.route = route;
 			this.sgm = sgm;
 			this.removedups = removedups;
 			this.index = index;
+			this.parsername=parsername;
 		}
 
 		/**
@@ -220,7 +339,7 @@ public class ConcurrentIndexator {
 			try {
 				System.out.println(String.format("Thread '%s' Indexing '%s'",
 						Thread.currentThread().getName(), folder));
-				indexDocs(writer, docDir, route, sgm);
+				indexDocs(writer, docDir, route, sgm,parsername);
 				if (removedups) {
 					writer.commit();
 					File[] files = docDir.listFiles();
@@ -235,12 +354,15 @@ public class ConcurrentIndexator {
 		}
 	}
 
-	static boolean checkFile(String fnam) {
-		return fnam.matches("reut2-\\d\\d\\d.sgm");
+	static boolean checkFile(String fnam,String parser) {
+		if("cacm".equals(parser))
+			return fnam.matches("cacm.all");
+		else
+			return fnam.matches("reut2-\\d\\d\\d.sgm");
 	}
 
 	static boolean checkFile(String fnam, int m) {
-		if (checkFile(fnam)) {
+		if (checkFile(fnam,"reuters")) {
 			int n = Integer.parseInt(fnam.substring(6, 9));
 			return (n == m);
 		} else
@@ -255,7 +377,7 @@ public class ConcurrentIndexator {
 		return DateTools.dateToString(date, DateTools.Resolution.SECOND);
 	}
 
-	static void indexDocs(IndexWriter writer, File file, boolean route, int sgm)
+	static void indexDocs(IndexWriter writer, File file, boolean route, int sgm,String parsername)
 			throws IOException {
 		// do not try to index files that cannot be read
 		if (file.canRead()) {
@@ -264,11 +386,13 @@ public class ConcurrentIndexator {
 				// an IO error could occur
 				if (files != null) {
 					for (int i = 0; i < files.length; i++) {
-						indexDocs(writer, new File(file, files[i]), route, sgm);
+						
+						indexDocs(writer, new File(file, files[i]), route, sgm,parsername);
+						
 					}
 				}
-			} else if (checkFile(file.getName())
-					&& (sgm == -1 || checkFile(file.getName(), sgm))) {
+			} else if (checkFile(file.getName(),parsername)
+					&& (sgm == -1 || checkFile(file.getName(), sgm)||parsername=="cacm")) {
 
 				FileInputStream fis;
 				try {
@@ -292,21 +416,53 @@ public class ConcurrentIndexator {
 					char[] content = text.toCharArray();
 					StringBuffer buffer = new StringBuffer();
 					buffer.append(content);
-					List<List<String>> dataList = Reuters21578Parser
-							.parseString(buffer);
-					for (List<String> articulo : dataList) 
-					{
+					List<List<String>> dataList =new LinkedList<List<String>>();
+					if ("cacm".equals(parsername)){
+						dataList = CACMParser
+								.parseString(buffer);					
+						for (List<String> articulo : dataList) 
+						{/*
+						Debéis indexar los campos docid (.I), title (.T), abstract (.W), date (.B), authors (.A), keywords
+(.K), entrydate (.N)
 						
-						Document doc = new Document();
-						doc.add(new TextField("title", articulo.get(0),
-								Field.Store.YES));
-						doc.add(new TextField("topics", articulo.get(2),
-								Field.Store.NO));
-						doc.add(new TextField("body", articulo.get(1),
-								Field.Store.NO));
-						doc.add(new TextField("dateline", articulo.get(3),
-								Field.Store.NO));
-						docs.add(doc);
+						*/
+							
+							Document doc = new Document();
+							
+							doc.add(new TextField("docid", articulo.get(0),
+									Field.Store.YES));
+							doc.add(new TextField("title", articulo.get(1),
+									Field.Store.NO));
+							doc.add(new TextField("abstract", articulo.get(2),
+									Field.Store.NO));
+							doc.add(new TextField("date", articulo.get(3),
+									Field.Store.YES));
+							doc.add(new TextField("authors", articulo.get(4),
+									Field.Store.YES));
+							doc.add(new TextField("keywords", articulo.get(5),
+									Field.Store.YES));
+							doc.add(new TextField("entrydate", articulo.get(6),
+									Field.Store.NO));
+							docs.add(doc);
+						}					
+					}
+					else{
+						dataList = Reuters21578Parser
+								.parseString(buffer);					
+						for (List<String> articulo : dataList) 
+						{
+							
+							Document doc = new Document();
+							doc.add(new TextField("title", articulo.get(0),
+									Field.Store.YES));
+							doc.add(new TextField("topics", articulo.get(2),
+									Field.Store.NO));
+							doc.add(new TextField("body", articulo.get(1),
+									Field.Store.NO));
+							doc.add(new TextField("dateline", articulo.get(3),
+									Field.Store.NO));
+							docs.add(doc);
+						}
 					}
 					if (route) {
 						Field pathField = new StringField("path",
@@ -424,6 +580,7 @@ public class ConcurrentIndexator {
 		boolean removedups = false;
 		int sgm = -1;
 		int nDirs = 0;
+		String parsername ="";
 
 		for (int i = 0; i < args.length; i++) {
 			if ("-index".equals(args[i])) {
@@ -464,7 +621,13 @@ public class ConcurrentIndexator {
 
 			} else if ("-onlydocs".equals(args[i])) {
 				sgm = Integer.parseInt(args[i + 1]);
+			} else if ("-parser".equals(args[i])){
+				parsername=args[i+1];
 			}
+			
+
+			
+			
 		}
 
 		if (docsPath.isEmpty() || docsPath.size() != indexPath.size()) {
@@ -492,7 +655,7 @@ public class ConcurrentIndexator {
 					Path path = docsPath.get(i);
 					final Runnable worker = new WorkerThread(path,
 							writer.get(i), route, sgm, removedups, indexPath
-									.get(i).toString());
+									.get(i).toString(),parsername);
 					executor.execute(worker);
 				}
 			}
