@@ -351,29 +351,28 @@ public class ConcurrentIndexator {
 		}
 	}
 
-	//Comprueba que el nombre de archivo se ajuste a la expresion reguñlar
+	// Comprueba que el nombre de archivo se ajuste a la expresion reguñlar
 	static boolean checkFile(String fnam, String parser) {
-		//System.err.println(fnam + " ; "+ parser + " ; " );
-		
-		if ("cacm".equals(parser)){
-			//return fnam.matches("cacm.all");					
-			return fnam.matches("cacm-\\d\\d\\d.all");}
-		else
+		// System.err.println(fnam + " ; "+ parser + " ; " );
+
+		if ("cacm".equals(parser)) {
+			// return fnam.matches("cacm.all");
+			return fnam.matches("cacm-\\d\\d\\d.all");
+		} else
 			return fnam.matches("reut2-\\d\\d\\d.sgm");
 	}
 
-	static boolean checkFile(String fnam, String parser,int m) {
-		int n=-1;
-		if (checkFile(fnam, parser)) 
-		{	
-			if(m==-1)return true;
-			if("cacm".equals(parser))
+	static boolean checkFile(String fnam, String parser, int m) {
+		int n = -1;
+		if (checkFile(fnam, parser)) {
+			if (m == -1)
+				return true;
+			if ("cacm".equals(parser))
 				n = Integer.parseInt(fnam.substring(5, 8));
 			else
 				n = Integer.parseInt(fnam.substring(6, 9));
 			return (n == m);
-		}
-		else	
+		} else
 			return false;
 	}
 
@@ -394,13 +393,14 @@ public class ConcurrentIndexator {
 				if (files != null) {
 					for (int i = 0; i < files.length; i++) {
 
-						indexDocs(writer, new File(file, files[i]), route, fileIndex,
-								parsername);
+						indexDocs(writer, new File(file, files[i]), route,
+								fileIndex, parsername);
 
 					}
 				}
-			} else if (checkFile(file.getName(), parsername,fileIndex)) {
-				System.out.println("Indexing file: " + file.getName() + " parser: " + parsername); 
+			} else if (checkFile(file.getName(), parsername, fileIndex)) {
+				System.out.println("Indexing file: " + file.getName()
+						+ " parser: " + parsername);
 				FileInputStream fis;
 				try {
 					fis = new FileInputStream(file);
@@ -440,7 +440,8 @@ public class ConcurrentIndexator {
 									Field.Store.YES));
 							doc.add(new TextField("entrydate", articulo.get(6),
 									Field.Store.NO));
-							doc.add(new TextField("hash", Integer.toString(articulo.toString().hashCode()),
+							doc.add(new TextField("hash", Integer
+									.toString(articulo.toString().hashCode()),
 									Field.Store.YES));
 							if (route)
 								doc.add(new StringField("path", file.getPath(),
@@ -461,7 +462,8 @@ public class ConcurrentIndexator {
 									Field.Store.NO));
 							doc.add(new TextField("dateline", articulo.get(3),
 									Field.Store.NO));
-							doc.add(new TextField("hash", Integer.toString(articulo.toString().hashCode()),
+							doc.add(new TextField("hash", Integer
+									.toString(articulo.toString().hashCode()),
 									Field.Store.YES));
 							if (route)
 								doc.add(new StringField("path", file.getPath(),
@@ -483,20 +485,31 @@ public class ConcurrentIndexator {
 		}
 	}
 
-	static void removeDups(IndexWriter writer)
-			throws IOException {
+	static void removeDups(IndexWriter writer) throws IOException {
+		List<String> hashes = new ArrayList<String>();
 		Directory dir = writer.getDirectory();
 		dir.clearLock("write");
-		String hash ="";		
+		String hash = "";
 		DirectoryReader dreader = DirectoryReader.open(dir);
 		AtomicReader atomicReader = SlowCompositeReaderWrapper
-				. wrap (( CompositeReader )  dreader ) ;
-		for(int i=0;i<atomicReader.getDocCount("hash");i++)
-		{
-			hash=atomicReader.document(i).get("hash");
-			System.err.println(hash);
+				.wrap((CompositeReader) dreader);
+		for (int i = 0; i < atomicReader.getDocCount("hash"); i++) {
+			Document doc = atomicReader.document(i);
+			hash = doc.get("hash");
+			if (hashes.contains(hash)) {
+
+				Term hashTerm = new Term("hash", hash);
+				BooleanQuery query = new BooleanQuery();
+				query.add(new BooleanClause(new TermQuery(hashTerm),
+						BooleanClause.Occur.MUST));
+				
+
+				writer.deleteDocuments(query);
+				writer.addDocument(doc);
+				
+			} else
+				hashes.add(hash);
 		}
-		
 	}
 
 	/** Index all text files under a directory. */
@@ -557,11 +570,10 @@ public class ConcurrentIndexator {
 				sgm = Integer.parseInt(args[i + 1]);
 			} else if ("-parser".equals(args[i])) {
 				parsername = args[i + 1];
-				if(!("cacm".equals(parsername)||"reuters".equals(parsername)))
-				{	
+				if (!("cacm".equals(parsername) || "reuters".equals(parsername))) {
 					System.err.println("Usage: " + usage);
 					System.exit(1);
-				}	
+				}
 			}
 
 		}
@@ -615,14 +627,17 @@ public class ConcurrentIndexator {
 			System.exit(-2);
 		} finally {
 			System.out.println("Finished all indexations");
-			System.out.print("Merging indexes into " + indexPath.get(0).toString() + "...");
+			System.out.print("Merging indexes into "
+					+ indexPath.get(0).toString() + "...");
 			try {
 				for (int i = 1; i < nDirs; i++) {
 					Directory dir = writer.get(i).getDirectory();
 					writer.get(i).close();
 					writer.get(0).addIndexes(dir);
 				}
-				removeDups(writer.get(0));
+				writer.get(0).commit();
+				if (removedups)
+					removeDups(writer.get(0));
 				writer.get(0).close();
 				System.out.print(" DONE");
 			} catch (IOException e) {
@@ -632,5 +647,3 @@ public class ConcurrentIndexator {
 
 	}
 }
-
-
