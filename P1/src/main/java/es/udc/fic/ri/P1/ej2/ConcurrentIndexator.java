@@ -355,9 +355,11 @@ public class ConcurrentIndexator {
 
 	//Comprueba que el nombre de archivo se ajuste a la expresion reguñlar
 	static boolean checkFile(String fnam, String parser) {
-		if ("cacm".equals(parser))
-			//return fnam.matches("cacm.all");
-			return fnam.matches("cacm-\\d\\d\\d.all");
+		//System.err.println(fnam + " ; "+ parser + " ; " );
+		
+		if ("cacm".equals(parser)){
+			//return fnam.matches("cacm.all");					
+			return fnam.matches("cacm-\\d\\d\\d.all");}
 		else
 			return fnam.matches("reut2-\\d\\d\\d.sgm");
 	}
@@ -366,6 +368,7 @@ public class ConcurrentIndexator {
 		int n=-1;
 		if (checkFile(fnam, parser)) 
 		{	
+			if(m==-1)return true;
 			if("cacm".equals(parser))
 				n = Integer.parseInt(fnam.substring(5, 8));
 			else
@@ -398,9 +401,8 @@ public class ConcurrentIndexator {
 
 					}
 				}
-			} else if (checkFile(file.getName(), parsername)
-					&& (fileIndex == -1 || checkFile(file.getName(), parsername,fileIndex))) {
-
+			} else if (checkFile(file.getName(), parsername,fileIndex)) {
+				System.out.println("Indexing file: " + file.getName() + " parser: " + parsername); 
 				FileInputStream fis;
 				try {
 					fis = new FileInputStream(file);
