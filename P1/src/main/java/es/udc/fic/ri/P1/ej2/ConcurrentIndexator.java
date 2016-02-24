@@ -13,6 +13,9 @@ import org.apache.lucene.document.StringField;
 import org.apache.lucene.document.TextField;
 import org.apache.lucene.index.IndexWriter;
 import org.apache.lucene.index.IndexWriterConfig.OpenMode;
+import org.apache.lucene.index.SlowCompositeReaderWrapper;
+import org.apache.lucene.index.AtomicReader;
+import org.apache.lucene.index.CompositeReader;
 import org.apache.lucene.index.DirectoryReader;
 import org.apache.lucene.index.IndexReader;
 import org.apache.lucene.index.IndexWriterConfig;
@@ -482,6 +485,17 @@ public class ConcurrentIndexator {
 
 	static void removeDups(IndexWriter writer)
 			throws IOException {
+		Directory dir = writer.getDirectory();
+		dir.clearLock("write");
+		String hash ="";		
+		DirectoryReader dreader = DirectoryReader.open(dir);
+		AtomicReader atomicReader = SlowCompositeReaderWrapper
+				. wrap (( CompositeReader )  dreader ) ;
+		for(int i=0;i<atomicReader.getDocCount("hash");i++)
+		{
+			hash=atomicReader.document(i).get("hash");
+			System.err.println(hash);
+		}
 		
 	}
 
