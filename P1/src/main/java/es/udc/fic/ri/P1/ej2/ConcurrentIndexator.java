@@ -440,7 +440,7 @@ public class ConcurrentIndexator {
 									Field.Store.YES));
 							doc.add(new TextField("entrydate", articulo.get(6),
 									Field.Store.NO));
-							doc.add(new TextField("hash", Integer
+							doc.add(new StringField("hash", Integer
 									.toString(articulo.toString().hashCode()),
 									Field.Store.YES));
 							if (route)
@@ -462,7 +462,7 @@ public class ConcurrentIndexator {
 									Field.Store.NO));
 							doc.add(new TextField("dateline", articulo.get(3),
 									Field.Store.NO));
-							doc.add(new TextField("hash", Integer
+							doc.add(new StringField("hash", Integer
 									.toString(articulo.toString().hashCode()),
 									Field.Store.YES));
 							if (route)
@@ -493,23 +493,21 @@ public class ConcurrentIndexator {
 		DirectoryReader dreader = DirectoryReader.open(dir);
 		AtomicReader atomicReader = SlowCompositeReaderWrapper
 				.wrap((CompositeReader) dreader);
-		for (int i = 0; i < atomicReader.getDocCount("hash"); i++) {
+		for (int i = 0; i < atomicReader.numDocs(); i++) {
 			Document doc = atomicReader.document(i);
 			hash = doc.get("hash");
+			Term hashTerm = new Term("hash", hash);
 			if (hashes.contains(hash)) {
-
-				Term hashTerm = new Term("hash", hash);
-				BooleanQuery query = new BooleanQuery();
-				query.add(new BooleanClause(new TermQuery(hashTerm),
-						BooleanClause.Occur.MUST));
+				writer.deleteDocuments(hashTerm);				
+				System.out.println(hashTerm.toString());
 				
-
-				writer.deleteDocuments(query);
-				writer.addDocument(doc);
-				
-			} else
+			} else {
+				writer.updateDocument(hashTerm,doc.getFields());
 				hashes.add(hash);
+			}	
+			
 		}
+		writer.commit();
 	}
 
 	/** Index all text files under a directory. */
@@ -633,11 +631,23 @@ public class ConcurrentIndexator {
 				for (int i = 1; i < nDirs; i++) {
 					Directory dir = writer.get(i).getDirectory();
 					writer.get(i).close();
-					writer.get(0).addIndexes(dir);
+					DirectoryReader dreader = DirectoryReader.open(dir);
+					AtomicReader atomicReader = SlowCompositeReaderWrapper
+							.wrap((CompositeReader) dreader);
+					for(int j=0;j<atomicReader.numDocs();j++)
+					{
+						Document doc=atomicReader.document(j);
+						String hash = doc.get("hash");
+						Term hashTerm = new Term("hash", hash);						
+						writer.get(0).updateDocument(hashTerm,doc.getFields());	
+						System.out.println(doc.toString());
+					}
+					
+					//writer.get(0).addIndexes(dir);
 				}
 				writer.get(0).commit();
-				if (removedups)
-					removeDups(writer.get(0));
+				//if (removedups)
+				//	removeDups(writer.get(0));
 				writer.get(0).close();
 				System.out.print(" DONE");
 			} catch (IOException e) {
