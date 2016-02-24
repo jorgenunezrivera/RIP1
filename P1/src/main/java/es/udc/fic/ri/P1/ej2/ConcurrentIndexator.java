@@ -341,7 +341,7 @@ public class ConcurrentIndexator {
 			try {
 				System.out.println(String.format("Thread '%s' Indexing '%s'",
 						Thread.currentThread().getName(), folder));
-				indexDocs(writer, docDir, route, fileindex, parsername);
+				indexDocs(writer, docDir, route, fileindex, parsername,removedups);
 
 			} catch (IOException e) {
 				System.out.println(" caught a " + e.getClass()
@@ -384,7 +384,7 @@ public class ConcurrentIndexator {
 	}
 
 	static void indexDocs(IndexWriter writer, File file, boolean route,
-			int fileIndex, String parsername) throws IOException {
+			int fileIndex, String parsername,Boolean removedups) throws IOException {
 		// do not try to index files that cannot be read
 		if (file.canRead()) {
 			if (file.isDirectory()) {
@@ -394,7 +394,7 @@ public class ConcurrentIndexator {
 					for (int i = 0; i < files.length; i++) {
 
 						indexDocs(writer, new File(file, files[i]), route,
-								fileIndex, parsername);
+								fileIndex, parsername,removedups);
 
 					}
 				}
@@ -446,7 +446,13 @@ public class ConcurrentIndexator {
 							if (route)
 								doc.add(new StringField("path", file.getPath(),
 										Field.Store.YES));
-							writer.addDocument(doc);
+							if(removedups){
+								String hash = doc.get("hash");
+								Term hashTerm = new Term("hash", hash);	
+								writer.updateDocument(hashTerm,doc);
+							}else{
+								writer.addDocument(doc);
+							}
 
 						}
 					} else {
@@ -468,7 +474,13 @@ public class ConcurrentIndexator {
 							if (route)
 								doc.add(new StringField("path", file.getPath(),
 										Field.Store.YES));
-							writer.addDocument(doc);
+							if(removedups){
+								String hash = doc.get("hash");
+								Term hashTerm = new Term("hash", hash);	
+								writer.updateDocument(hashTerm,doc);
+							}else{
+								writer.addDocument(doc);
+							}
 						}
 					}
 
@@ -630,20 +642,24 @@ public class ConcurrentIndexator {
 			try {
 				for (int i = 1; i < nDirs; i++) {
 					Directory dir = writer.get(i).getDirectory();
-					writer.get(i).close();
-					DirectoryReader dreader = DirectoryReader.open(dir);
-					AtomicReader atomicReader = SlowCompositeReaderWrapper
-							.wrap((CompositeReader) dreader);
-					for(int j=0;j<atomicReader.numDocs();j++)
+					if(removedups)
 					{
-						Document doc=atomicReader.document(j);
-						String hash = doc.get("hash");
-						Term hashTerm = new Term("hash", hash);						
-						writer.get(0).updateDocument(hashTerm,doc.getFields());	
-						System.out.println(doc.toString());
+						writer.get(i).close();
+						DirectoryReader dreader = DirectoryReader.open(dir);
+						AtomicReader atomicReader = SlowCompositeReaderWrapper
+								.wrap((CompositeReader) dreader);
+						for(int j=0;j<atomicReader.numDocs();j++)
+						{
+							Document doc=atomicReader.document(j);
+							String hash = doc.get("hash");
+							Term hashTerm = new Term("hash", hash);						
+							writer.get(0).updateDocument(hashTerm,doc.getFields());	
+							System.out.println(doc.toString());
+						}
+					}else{
+						writer.get(0).addIndexes(dir);
 					}
-					
-					//writer.get(0).addIndexes(dir);
+						
 				}
 				writer.get(0).commit();
 				//if (removedups)
