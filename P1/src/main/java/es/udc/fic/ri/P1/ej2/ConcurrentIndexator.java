@@ -304,7 +304,7 @@ public class ConcurrentIndexator {
 		private final Path folder;
 		private final IndexWriter writer;
 		private final boolean route;
-		private final int sgm;
+		private final int fileindex;
 		private final boolean removedups;
 		private final String index;
 		private final String parsername;
@@ -315,7 +315,7 @@ public class ConcurrentIndexator {
 			this.folder = folder;
 			this.writer = writer;
 			this.route = route;
-			this.sgm = sgm;
+			this.fileindex = sgm;
 			this.removedups = removedups;
 			this.index = index;
 			this.parsername = parsername;
@@ -338,7 +338,7 @@ public class ConcurrentIndexator {
 			try {
 				System.out.println(String.format("Thread '%s' Indexing '%s'",
 						Thread.currentThread().getName(), folder));
-				indexDocs(writer, docDir, route, sgm, parsername);
+				indexDocs(writer, docDir, route, fileindex, parsername);
 				if (removedups) {
 					writer.commit();
 					File[] files = docDir.listFiles();
@@ -353,18 +353,26 @@ public class ConcurrentIndexator {
 		}
 	}
 
+	//Comprueba que el nombre de archivo se ajuste a la expresion reguñlar
 	static boolean checkFile(String fnam, String parser) {
 		if ("cacm".equals(parser))
-			return fnam.matches("cacm.all");
+			//return fnam.matches("cacm.all");
+			return fnam.matches("cacm-\\d\\d\\d.all");
 		else
 			return fnam.matches("reut2-\\d\\d\\d.sgm");
 	}
 
-	static boolean checkFile(String fnam, int m) {
-		if (checkFile(fnam, "reuters")) {
-			int n = Integer.parseInt(fnam.substring(6, 9));
+	static boolean checkFile(String fnam, String parser,int m) {
+		int n=-1;
+		if (checkFile(fnam, parser)) 
+		{	
+			if("cacm".equals(parser))
+				n = Integer.parseInt(fnam.substring(5, 8));
+			else
+				n = Integer.parseInt(fnam.substring(6, 9));
 			return (n == m);
-		} else
+		}
+		else	
 			return false;
 	}
 
@@ -376,7 +384,7 @@ public class ConcurrentIndexator {
 	}
 
 	static void indexDocs(IndexWriter writer, File file, boolean route,
-			int sgm, String parsername) throws IOException {
+			int fileIndex, String parsername) throws IOException {
 		// do not try to index files that cannot be read
 		if (file.canRead()) {
 			if (file.isDirectory()) {
@@ -385,13 +393,13 @@ public class ConcurrentIndexator {
 				if (files != null) {
 					for (int i = 0; i < files.length; i++) {
 
-						indexDocs(writer, new File(file, files[i]), route, sgm,
+						indexDocs(writer, new File(file, files[i]), route, fileIndex,
 								parsername);
 
 					}
 				}
 			} else if (checkFile(file.getName(), parsername)
-					&& (sgm == -1 || checkFile(file.getName(), sgm) || parsername == "cacm")) {
+					&& (fileIndex == -1 || checkFile(file.getName(), parsername,fileIndex))) {
 
 				FileInputStream fis;
 				try {
@@ -534,6 +542,11 @@ public class ConcurrentIndexator {
 				sgm = Integer.parseInt(args[i + 1]);
 			} else if ("-parser".equals(args[i])) {
 				parsername = args[i + 1];
+				if(!("cacm".equals(parsername)||"reuters".equals(parsername)))
+				{	
+					System.err.println("Usage: " + usage);
+					System.exit(1);
+				}	
 			}
 
 		}
