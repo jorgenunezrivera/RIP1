@@ -304,7 +304,7 @@ public class ConcurrentIndexator {
 		private final Path folder;
 		private final IndexWriter writer;
 		private final boolean route;
-		private final int sgm;
+		private final int fileindex;
 		private final boolean removedups;
 		private final String index;
 		private final String parsername;
@@ -315,7 +315,7 @@ public class ConcurrentIndexator {
 			this.folder = folder;
 			this.writer = writer;
 			this.route = route;
-			this.sgm = sgm;
+			this.fileindex = sgm;
 			this.removedups = removedups;
 			this.index = index;
 			this.parsername = parsername;
@@ -338,12 +338,7 @@ public class ConcurrentIndexator {
 			try {
 				System.out.println(String.format("Thread '%s' Indexing '%s'",
 						Thread.currentThread().getName(), folder));
-				indexDocs(writer, docDir, route, sgm, parsername);
-				if (removedups) {
-					writer.commit();
-					File[] files = docDir.listFiles();
-					removeDups(writer, index);
-				}
+				indexDocs(writer, docDir, route, fileindex, parsername);
 
 			} catch (IOException e) {
 				System.out.println(" caught a " + e.getClass()
@@ -353,18 +348,29 @@ public class ConcurrentIndexator {
 		}
 	}
 
+	//Comprueba que el nombre de archivo se ajuste a la expresion reguñlar
 	static boolean checkFile(String fnam, String parser) {
-		if ("cacm".equals(parser))
-			return fnam.matches("cacm.all");
+		//System.err.println(fnam + " ; "+ parser + " ; " );
+		
+		if ("cacm".equals(parser)){
+			//return fnam.matches("cacm.all");					
+			return fnam.matches("cacm-\\d\\d\\d.all");}
 		else
 			return fnam.matches("reut2-\\d\\d\\d.sgm");
 	}
 
-	static boolean checkFile(String fnam, int m) {
-		if (checkFile(fnam, "reuters")) {
-			int n = Integer.parseInt(fnam.substring(6, 9));
+	static boolean checkFile(String fnam, String parser,int m) {
+		int n=-1;
+		if (checkFile(fnam, parser)) 
+		{	
+			if(m==-1)return true;
+			if("cacm".equals(parser))
+				n = Integer.parseInt(fnam.substring(5, 8));
+			else
+				n = Integer.parseInt(fnam.substring(6, 9));
 			return (n == m);
-		} else
+		}
+		else	
 			return false;
 	}
 
@@ -376,7 +382,7 @@ public class ConcurrentIndexator {
 	}
 
 	static void indexDocs(IndexWriter writer, File file, boolean route,
-			int sgm, String parsername) throws IOException {
+			int fileIndex, String parsername) throws IOException {
 		// do not try to index files that cannot be read
 		if (file.canRead()) {
 			if (file.isDirectory()) {
@@ -385,14 +391,13 @@ public class ConcurrentIndexator {
 				if (files != null) {
 					for (int i = 0; i < files.length; i++) {
 
-						indexDocs(writer, new File(file, files[i]), route, sgm,
+						indexDocs(writer, new File(file, files[i]), route, fileIndex,
 								parsername);
 
 					}
 				}
-			} else if (checkFile(file.getName(), parsername)
-					&& (sgm == -1 || checkFile(file.getName(), sgm) || parsername == "cacm")) {
-
+			} else if (checkFile(file.getName(), parsername,fileIndex)) {
+				System.out.println("Indexing file: " + file.getName() + " parser: " + parsername); 
 				FileInputStream fis;
 				try {
 					fis = new FileInputStream(file);
@@ -421,7 +426,7 @@ public class ConcurrentIndexator {
 							doc.add(new TextField("docid", articulo.get(0),
 									Field.Store.YES));
 							doc.add(new TextField("title", articulo.get(1),
-									Field.Store.NO));
+									Field.Store.YES));
 							doc.add(new TextField("abstract", articulo.get(2),
 									Field.Store.NO));
 							doc.add(new TextField("date", articulo.get(3),
@@ -432,6 +437,8 @@ public class ConcurrentIndexator {
 									Field.Store.YES));
 							doc.add(new TextField("entrydate", articulo.get(6),
 									Field.Store.NO));
+							doc.add(new TextField("hash", articulo.toString(),
+									Field.Store.YES));
 							if (route)
 								doc.add(new StringField("path", file.getPath(),
 										Field.Store.YES));
@@ -446,11 +453,13 @@ public class ConcurrentIndexator {
 							doc.add(new TextField("title", articulo.get(0),
 									Field.Store.YES));
 							doc.add(new TextField("topics", articulo.get(2),
-									Field.Store.NO));
+									Field.Store.YES));
 							doc.add(new TextField("body", articulo.get(1),
 									Field.Store.NO));
 							doc.add(new TextField("dateline", articulo.get(3),
 									Field.Store.NO));
+							doc.add(new TextField("hash", articulo.toString(),
+									Field.Store.YES));
 							if (route)
 								doc.add(new StringField("path", file.getPath(),
 										Field.Store.YES));
@@ -471,7 +480,7 @@ public class ConcurrentIndexator {
 		}
 	}
 
-	static void removeDups(IndexWriter writer, String index)
+	static void removeDups(IndexWriter writer)
 			throws IOException {
 		
 	}
@@ -534,6 +543,11 @@ public class ConcurrentIndexator {
 				sgm = Integer.parseInt(args[i + 1]);
 			} else if ("-parser".equals(args[i])) {
 				parsername = args[i + 1];
+				if(!("cacm".equals(parsername)||"reuters".equals(parsername)))
+				{	
+					System.err.println("Usage: " + usage);
+					System.exit(1);
+				}	
 			}
 
 		}
@@ -586,20 +600,23 @@ public class ConcurrentIndexator {
 			e.printStackTrace();
 			System.exit(-2);
 		} finally {
+			System.out.println("Finished all indexations");
+			System.out.print("Merging indexes into " + indexPath.get(0).toString() + "...");
 			try {
 				for (int i = 1; i < nDirs; i++) {
 					Directory dir = writer.get(i).getDirectory();
 					writer.get(i).close();
 					writer.get(0).addIndexes(dir);
 				}
-				removeDups(writer.get(0), indexPath.get(0).toString());
+				removeDups(writer.get(0));
 				writer.get(0).close();
+				System.out.print(" DONE");
 			} catch (IOException e) {
 				e.printStackTrace();
 			}
 		}
 
-		System.out.println("Finished all threads");
-
 	}
 }
+
+
