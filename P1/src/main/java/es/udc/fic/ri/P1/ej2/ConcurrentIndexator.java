@@ -437,7 +437,7 @@ public class ConcurrentIndexator {
 									Field.Store.YES));
 							doc.add(new TextField("entrydate", articulo.get(6),
 									Field.Store.NO));
-							doc.add(new TextField("hash", articulo.toString(),
+							doc.add(new TextField("hash", Integer.toString(articulo.toString().hashCode()),
 									Field.Store.YES));
 							if (route)
 								doc.add(new StringField("path", file.getPath(),
@@ -458,7 +458,7 @@ public class ConcurrentIndexator {
 									Field.Store.NO));
 							doc.add(new TextField("dateline", articulo.get(3),
 									Field.Store.NO));
-							doc.add(new TextField("hash", articulo.toString(),
+							doc.add(new TextField("hash", Integer.toString(articulo.toString().hashCode()),
 									Field.Store.YES));
 							if (route)
 								doc.add(new StringField("path", file.getPath(),
